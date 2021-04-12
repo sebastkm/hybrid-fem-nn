@@ -1,0 +1,9 @@
+*.pyc
+.cache/*
+*.swp
+*.egg-info
+*.py~
+dist/*
+.idea/*
+
+

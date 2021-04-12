@@ -15,65 +15,61 @@ class ANN(object):
             return object.__new__(cls)
 
     def __init__(self, *args, **kwargs):
-        self.mesh = kwargs.get("mesh")
         if isinstance(args[0], str):
             # Pickle has loaded the weights.
-            self.load_weights()
+            pass
         else:
             layers = args[0]
             bias = kwargs.get("bias")
             sigma = kwargs.get("sigma", ufl.tanh)
             init_method = kwargs.get("init_method", "normal")
-            self.weights = generate_weights(self.mesh, layers, bias, init_method=init_method)
+            self.weights = generate_weights(layers, bias, init_method=init_method)
             self.layers = layers
             self.bias = bias
             self.sigma = sigma
             self.ctrls = None
             self.backup_weights_flat = None
 
-    def save(self, name):
-        with open(f"weights/{name}", "wb") as f:
+    def save(self, path):
+        with open(f"{path}", "wb") as f:
             pickle.dump(self, f)
 
     @classmethod
-    def load(cls, name):
-        with open(f"weights/{name}", "rb") as f:
+    def load(cls, path):
+        with open(f"{path}", "rb") as f:
             return pickle.load(f)
 
-    def load_weights(self):
-        weights = generate_weights(self.mesh, self.layers, self.bias)
-        for weight, sweight in zip(weights, self.weights):
-            for w, sw in zip(weight["coefficient"], sweight["coefficient"]):
-                w.vector()[:] = sw
-            if "bias" in weight:
-                weight["bias"].vector()[:] = sweight["bias"]
+    def __setstate__(self, state):
+        self.__dict__ = state
+        weights = []
+        for w in self.weights:
+            weight = {}
+            weight["weight"] = Constant(np.reshape(w["weight"], w["weight_shape"]))
+            if "bias" in w:
+                weight["bias"] = Constant(np.reshape(w["bias"], w["bias_shape"]))
+            weights.append(weight)
         self.weights = weights
 
     def __getstate__(self):
-        r = self.__dict__.copy()
+        state = self.__dict__.copy()
         weights = []
         for weight in self.weights:
             app = {}
-            coefficient = []
-            for w in weight["coefficient"]:
-                if not isinstance(w, np.ndarray):
-                    w = w.vector().get_local()
-                coefficient.append(w)
-            app["coefficient"] = coefficient
+            w = weight["weight"]
+            app["weight"] = w.values()
+            app["weight_shape"] = w.ufl_shape
             if "bias" in weight:
                 bias = weight["bias"]
-                if not isinstance(bias, np.ndarray):
-                    bias = bias.vector().get_local()
-                app["bias"] = bias
+                app["bias"] = bias.values()
+                app["bias_shape"] = bias.ufl_shape
             weights.append(app)
-        r["weights"] = weights
-        r["mesh"] = None
-        r["ctrls"] = None
-        r["backup_weights_flat"] = None
-        return r
+        state["weights"] = weights
+        state["ctrls"] = None
+        state["backup_weights_flat"] = None
+        return state
 
-    def __call__(self, inputs):
-        return NN(inputs, self.weights, self.sigma)
+    def __call__(self, *args):
+        return NN(args, self.weights, self.sigma)
 
     def weights_flat(self):
         ctrls = self.weights_ctrls()
@@ -86,8 +82,7 @@ class ANN(object):
         if self.ctrls is None:
             r = []
             for weight in self.weights:
-                for w in weight["coefficient"]:
-                    r.append(Control(w))
+                r.append(Control(weight["weight"]))
                 if "bias" in weight:
                     r.append(Control(weight["bias"]))
             self.ctrls = r
@@ -102,37 +97,34 @@ class ANN(object):
     def set_weights(self, weights):
         i = 0
         for weight in self.weights:
-            for w in weight["coefficient"]:
-                w.vector()[:] = weights[i].vector()
-                w.block_variable.save_output()
-                i += 1
+            w = weight["weight"]
+            w.assign(weights[i])
+            w.block_variable.save_output()
+            i += 1
             if "bias" in weight:
-                weight["bias"].vector()[:] = weights[i].vector()
+                weight["bias"].assign(weights[i])
                 weight["bias"].block_variable.save_output()
                 i += 1
 
 
-def generate_weights(mesh, layers, bias, init_method="normal"):
+def generate_weights(layers, bias, init_method="normal"):
     init_method = init_method.lower()
     assert init_method in ["normal", "uniform"]
 
     weights = []
     for i in range(len(layers)-1):
-        R_layer, vector_layer = max(layers[i+1], layers[i]), min(layers[i+1], layers[i])
-        R = VectorFunctionSpace(mesh, "R", 0, dim=R_layer)
-        ws = []
         weight = {}
-        for _ in range(vector_layer):
-            W = Function(R)
-            if init_method == "uniform":
-                W.vector()[:] = random(R.dim())
-            elif init_method == "normal":
-                W.vector()[:] = np.sqrt(2 / vector_layer) * randn(R.dim())
-            ws.append(W)
-        weight["coefficient"] = ws
+
+        dim = np.prod(layers[i] * layers[i+1])
+        if init_method == "uniform":
+            value = random(dim)
+        elif init_method == "normal":
+            value = np.sqrt(2 / layers[i]) * randn(dim)
+        weight["weight"] = Constant(value.reshape(layers[i+1], layers[i]))
+
         if bias[i]:
-            R = VectorFunctionSpace(mesh, "R", 0, dim=layers[i + 1])
-            weight["bias"] = Function(R)
+            b = Constant(np.zeros(layers[i+1]))
+            weight["bias"] = b
         weights.append(weight)
     return weights
 
@@ -141,19 +133,13 @@ def NN(inputs, weights, sigma):
     r = as_vector(inputs)
     depth = len(weights)
     for i, weight in enumerate(weights):
-        l = []
-        for w in weight["coefficient"]:
-            l.append(w)
-        vec = as_vector(l)
-        if w.ufl_shape[0] != r.ufl_shape[0]:
-            vec = ufl.transpose(vec)
-        term = vec * r
+        term = weight["weight"] * r
         if "bias" in weight:
             term += weight["bias"]
         if i + 1 >= depth:
             r = term
         else:
-            r = nonlin_function(term, func=sigma)
+            r = apply_activation(term, func=sigma)
 
     if r.ufl_shape[0] == 1:
         return r[0]
@@ -176,7 +162,9 @@ def sigmoid(x):
     return 1/(1 + ufl.exp(-x))
 
 
-def nonlin_function(vec, func=ufl.tanh):
+def apply_activation(vec, func=ufl.tanh):
+    """Applies the activation function `func` element-wise to the UFL expression `vec`.
+    """
     v = [func(vec[i]) for i in range(vec.ufl_shape[0])]
     return ufl.as_vector(v)
 
