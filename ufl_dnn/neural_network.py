@@ -109,7 +109,7 @@ class ANN(object):
 
 def generate_weights(layers, bias, init_method="normal"):
     init_method = init_method.lower()
-    assert init_method in ["normal", "uniform"]
+    assert init_method in ["normal", "uniform", "pytorch_uniform"]
 
     weights = []
     for i in range(len(layers)-1):
@@ -120,6 +120,8 @@ def generate_weights(layers, bias, init_method="normal"):
             value = random(dim)
         elif init_method == "normal":
             value = np.sqrt(2 / layers[i]) * randn(dim)
+        elif init_method == "pytorch_uniform":
+            value = np.sqrt(layers[i]) * (2 * random(dim) - 1)
         weight["weight"] = Constant(value.reshape(layers[i+1], layers[i]))
 
         if bias[i]:
