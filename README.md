@@ -63,3 +63,9 @@ or directly
 ```
 pip install git+https://github.com/sebastkm/hybrid-fem-nn.git@master
 ```
+
+**Note:** Right now this package depends on a branch of dolfin-adjoint. Hopefully this is merged into the master branch soon.
+Meanwhile you can install a compatible version of dolfin-adjoint by running:
+```
+pip install git+https://github.com/dolfin-adjoint/pyadjoint.git@constant-adjfloat
+```
