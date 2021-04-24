@@ -58,7 +58,7 @@ def test_taylor():
     for w in net.weights_flat():
         h.append(Constant(randn(*w.ufl_shape)))
 
-    taylor_test(Jhat, m, h)
+    assert taylor_test(Jhat, m, h) > 1.9
 
 
 def test_save_and_load(tmpdir):
