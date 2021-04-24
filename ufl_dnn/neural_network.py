@@ -23,10 +23,12 @@ class ANN(object):
             bias = kwargs.get("bias")
             sigma = kwargs.get("sigma", ufl.tanh)
             init_method = kwargs.get("init_method", "normal")
+            output_activation = kwargs.get("output_activation", None)
             self.weights = generate_weights(layers, bias, init_method=init_method)
             self.layers = layers
             self.bias = bias
             self.sigma = sigma
+            self.output_activation = output_activation
             self.ctrls = None
             self.backup_weights_flat = None
 
@@ -69,7 +71,7 @@ class ANN(object):
         return state
 
     def __call__(self, *args):
-        return NN(args, self.weights, self.sigma)
+        return NN(args, self.weights, self.sigma, self.output_activation)
 
     def weights_flat(self):
         ctrls = self.weights_ctrls()
@@ -131,7 +133,7 @@ def generate_weights(layers, bias, init_method="normal"):
     return weights
 
 
-def NN(inputs, weights, sigma):
+def NN(inputs, weights, sigma, output_activation=None):
     r = as_vector(inputs)
     depth = len(weights)
     for i, weight in enumerate(weights):
@@ -143,6 +145,8 @@ def NN(inputs, weights, sigma):
         else:
             r = apply_activation(term, func=sigma)
 
+    if output_activation is not None:
+        r = apply_activation(r, func=output_activation)
     if r.ufl_shape[0] == 1:
         return r[0]
     return r
