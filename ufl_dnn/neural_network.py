@@ -164,6 +164,10 @@ class ELU(object):
         return conditional(ufl.gt(x, 0), x, self.alpha * (ufl.exp(x) - 1))
 
 
+def relu(x):
+	return ufl.Max(0, x)
+
+
 def sigmoid(x):
     return 1/(1 + ufl.exp(-x))
 
